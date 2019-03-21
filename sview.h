@@ -1,5 +1,10 @@
 #pragma once
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 
 typedef struct sview sview_t;
@@ -31,3 +36,8 @@ void sview_put_picture(sview_t *sv, int col, int row,
 
 sview_picture_t *sview_picture_alloc(unsigned int width, unsigned int height,
                                      sview_pixfmt_t pixfmt, int clear);
+
+
+#ifdef __cplusplus
+}
+#endif
