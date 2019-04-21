@@ -217,7 +217,7 @@ upload_tex(tex_t *t)
                  0, GL_RGBA, GL_UNSIGNED_BYTE, sp->planes[0]);
     break;
   case SVIEW_PIXFMT_I:
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_INTENSITY,
                  sp->width, sp->height,
                  0, GL_RED, GL_UNSIGNED_BYTE, sp->planes[0]);
     break;
