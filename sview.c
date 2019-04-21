@@ -522,10 +522,9 @@ sview_picture_alloc(unsigned int width, unsigned int height,
 
   sp->strides[0] = bpp * width;
   const size_t siz = sp->strides[0] * height;
+  sp->planes[0] = valloc(siz);
   if(clear)
-    sp->planes[0] = calloc(1, siz);
-  else
-    sp->planes[0] = malloc(siz);
+    memset(sp->planes[0], 0, siz);
   return sp;
 }
 
