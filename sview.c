@@ -94,9 +94,8 @@ text_draw_simple(uint32_t max_width, uint32_t max_height,
   width  = MIN(max_width,  width);
   height = MIN(max_height, height);
 
-
   sview_picture_t *sv = sview_picture_alloc(width, height,
-                                            SVIEW_PIXFMT_BGRA, 0);
+                                            SVIEW_PIXFMT_RGBA, 0);
 
   uint32_t *d = (uint32_t *)sv->planes[0];
   const size_t s = sv->height * sv->strides[0];
@@ -211,10 +210,20 @@ upload_tex(tex_t *t)
   }
 
   switch(sp->pixfmt) {
-  case SVIEW_PIXFMT_BGRA:
+  case SVIEW_PIXFMT_RGBA:
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
                  sp->width, sp->height,
                  0, GL_RGBA, GL_UNSIGNED_BYTE, sp->planes[0]);
+    break;
+  case SVIEW_PIXFMT_BGRA:
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                 sp->width, sp->height,
+                 0, GL_BGRA, GL_UNSIGNED_BYTE, sp->planes[0]);
+    break;
+  case SVIEW_PIXFMT_RGB:
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                 sp->width, sp->height,
+                 0, GL_RGB, GL_UNSIGNED_BYTE, sp->planes[0]);
     break;
   case SVIEW_PIXFMT_I:
     glTexImage2D(GL_TEXTURE_2D, 0, GL_INTENSITY,
@@ -509,8 +518,12 @@ sview_picture_alloc(unsigned int width, unsigned int height,
 
   int bpp;
   switch(pixfmt) {
+  case SVIEW_PIXFMT_RGBA:
   case SVIEW_PIXFMT_BGRA:
     bpp = 4;
+    break;
+  case SVIEW_PIXFMT_RGB:
+    bpp = 3;
     break;
   case SVIEW_PIXFMT_I:
     bpp = 1;
@@ -520,7 +533,7 @@ sview_picture_alloc(unsigned int width, unsigned int height,
     return NULL;
   }
 
-  sp->strides[0] = bpp * width;
+  sp->strides[0] = ((bpp * width) + 4) & ~4;
   const size_t siz = sp->strides[0] * height;
   sp->planes[0] = valloc(siz);
   if(clear)

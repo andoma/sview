@@ -10,7 +10,9 @@ extern "C" {
 typedef struct sview sview_t;
 
 typedef enum sview_pixfmt {
+  SVIEW_PIXFMT_RGBA,
   SVIEW_PIXFMT_BGRA,
+  SVIEW_PIXFMT_RGB,
   SVIEW_PIXFMT_I,
 } sview_pixfmt_t;
 
