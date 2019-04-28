@@ -48,11 +48,95 @@ struct sview {
   pthread_mutex_t sv_cell_mutex;
   struct img_cell_queue sv_cells;
   struct img_cell_queue sv_pending_cells;
+
+  sview_widget_t *sv_widgets;
 };
 
-typedef struct rectf {
+typedef struct rect {
   int left, top, right, bottom;
 } rect_t;
+
+typedef struct rgb {
+  float r,g,b;
+} rgb_t;
+
+
+
+static rect_t
+rect_inset(const rect_t src, int x, int y)
+{
+  return (rect_t){src.left + x, src.top + y, src.right - x, src.bottom - y};
+}
+
+static rect_t
+rect_pad(const rect_t src, int left, int top, int right, int bottom)
+{
+  return (rect_t){src.left + left, src.top + top, src.right - right,
+      src.bottom - bottom};
+}
+
+
+static rect_t
+rect_fit(const tex_t *t, const rect_t rect)
+{
+  int r_width  =  rect.right  - rect.left;
+  int r_cx     = (rect.right  + rect.left) / 2;
+  int r_height =  rect.bottom - rect.top;
+  int r_cy     = (rect.bottom + rect.top) / 2;
+
+  const float img_a = (float)t->t_width / (float)t->t_height;
+  const float r_a   = (float)r_width / r_height;
+
+  if(r_a > img_a) {
+    r_width = r_height * img_a;
+  } else if(r_a < img_a) {
+    r_height = r_width / img_a;
+  }
+
+  r_width  -= 4;
+  r_height -= 4;
+
+  if(r_width < 1 || r_height < 1)
+    return (rect_t){0,0,0,0};
+
+  const rect_t r = {
+    r_cx - r_width  / 2,
+    r_cy - r_height / 2,
+    r_cx + r_width  / 2,
+    r_cy + r_height / 2,
+  };
+  return r;
+}
+
+
+static rect_t
+rect_align(const tex_t *t, const rect_t rect, int how)
+{
+  rect_t r = rect;
+  switch(how) {
+  case 1: case 2: case 3:
+    r.top = r.bottom - t->t_height;
+    break;
+  case 4: case 5: case 6:
+    r.top = (r.top + r.bottom) / 2 - t->t_height / 2;
+  case 7: case 8: case 9:
+    r.bottom = r.top + t->t_height;
+    break;
+  }
+
+  switch(how) {
+  case 3: case 6: case 9:
+    r.left = r.right - t->t_width;
+    break;
+  case 2: case 5: case 8:
+    r.left = (r.left + r.right) / 2 - t->t_width / 2;
+  case 1: case 4: case 7:
+    r.right = r.left + t->t_width;
+    break;
+  }
+  return r;
+}
+
 
 
 static sview_picture_t *
@@ -193,13 +277,10 @@ copy_pending_cells(sview_t *sv)
   }
 }
 
-static void
-upload_tex(tex_t *t)
-{
-  sview_picture_t *sp = t->t_source;
-  if(sp == NULL)
-    return;
 
+static void
+tex_set_pic(tex_t *t, sview_picture_t *sp)
+{
   if(t->t_texture == 0) {
     glGenTextures(1, &t->t_texture);
     glBindTexture(GL_TEXTURE_2D, t->t_texture);
@@ -234,7 +315,26 @@ upload_tex(tex_t *t)
 
   t->t_width  = sp->width;
   t->t_height = sp->height;
+}
+
+
+
+static void
+tex_upload(tex_t *t)
+{
+  sview_picture_t *sp = t->t_source;
+  if(sp == NULL)
+    return;
+  tex_set_pic(t, sp);
   tex_source_free(t);
+}
+
+
+static void
+tex_use_pic(tex_t *t, sview_picture_t *sp)
+{
+  tex_set_pic(t, sp);
+  sp->release(sp);
 }
 
 
@@ -244,14 +344,14 @@ upload_textures(sview_t *sv)
 {
   img_cell_t *ic;
   TAILQ_FOREACH(ic, &sv->sv_cells, ic_link) {
-    upload_tex(&ic->ic_content);
-    upload_tex(&ic->ic_overlay);
+    tex_upload(&ic->ic_content);
+    tex_upload(&ic->ic_overlay);
   }
 }
 
 
 static void
-draw_tex(const tex_t *t, const rect_t r)
+tex_draw(const tex_t *t, const rect_t rect, const rgb_t col)
 {
   if(t->t_texture == 0)
     return;
@@ -259,70 +359,32 @@ draw_tex(const tex_t *t, const rect_t r)
   glBindTexture(GL_TEXTURE_2D, t->t_texture);
 
   glDisable(GL_BLEND);
-  glColor4f(1,1,1,1);
+  glColor4f(col.r,col.g,col.b,1);
   glBegin(GL_QUADS);
-  glTexCoord2f(0, 0);   glVertex3f(r.left,  r.top,    0);
-  glTexCoord2f(1, 0);   glVertex3f(r.right, r.top,    0);
-  glTexCoord2f(1, 1);   glVertex3f(r.right, r.bottom, 0);
-  glTexCoord2f(0, 1);   glVertex3f(r.left,  r.bottom, 0);
+  glTexCoord2f(0, 0);   glVertex3f(rect.left,  rect.top,    0);
+  glTexCoord2f(1, 0);   glVertex3f(rect.right, rect.top,    0);
+  glTexCoord2f(1, 1);   glVertex3f(rect.right, rect.bottom, 0);
+  glTexCoord2f(0, 1);   glVertex3f(rect.left,  rect.bottom, 0);
   glEnd();
   glEnable(GL_BLEND);
 }
 
-static rect_t
-rect_inset(rect_t src, int x, int y)
+
+static void
+crosshair_draw(const rect_t rect)
 {
-  return (rect_t){src.left + x, src.top + y, src.right - x, src.bottom - y};
+  glDisable(GL_TEXTURE_2D);
+  glColor4f(0,1,0,1);
+  glBegin(GL_LINES);
+  int xc = (rect.left + rect.right)  / 2;
+  int yc = (rect.top  + rect.bottom) / 2;
+  glVertex3f(xc,  rect.top,    0);
+  glVertex3f(xc,  rect.bottom, 0);
+  glVertex3f(rect.left,  yc, 0);
+  glVertex3f(rect.right, yc, 0);
+  glEnd();
+  glEnable(GL_TEXTURE_2D);
 }
-
-
-static rect_t
-rect_fit(const tex_t *t, const rect_t rect)
-{
-  int r_width  =  rect.right  - rect.left;
-  int r_cx     = (rect.right  + rect.left) / 2;
-  int r_height =  rect.bottom - rect.top;
-  int r_cy     = (rect.bottom + rect.top) / 2;
-
-  const float img_a = (float)t->t_width / (float)t->t_height;
-  const float r_a   = (float)r_width / r_height;
-
-  if(r_a > img_a) {
-    r_width = r_height * img_a;
-  } else if(r_a < img_a) {
-    r_height = r_width / img_a;
-  }
-
-  r_width  -= 4;
-  r_height -= 4;
-
-  if(r_width < 1 || r_height < 1)
-    return (rect_t){0,0,0,0};
-
-  const rect_t r = {
-    r_cx - r_width  / 2,
-    r_cy - r_height / 2,
-    r_cx + r_width  / 2,
-    r_cy + r_height / 2,
-  };
-  return r;
-}
-
-
-static rect_t
-rect_align(const tex_t *t, const rect_t rect)
-{
-  const rect_t r = {
-    .left = rect.left,
-    .top = rect.top,
-    .right = rect.left + t->t_width,
-    .bottom = rect.top + t->t_height
-  };
-  return r;
-
-}
-
-
 
 
 static void
@@ -349,14 +411,131 @@ draw_cells(sview_t *sv, const rect_t r0)
     };
 
     const rect_t inner = rect_fit(&ic->ic_content, r);
-    draw_tex(&ic->ic_content, inner);
+    tex_draw(&ic->ic_content, inner, (rgb_t){1,1,1});
+    crosshair_draw(inner);
 
-    draw_tex(&ic->ic_overlay, rect_align(&ic->ic_overlay,
-                                         rect_inset(inner, 10,10)));
+    tex_draw(&ic->ic_overlay, rect_align(&ic->ic_overlay,
+                                         rect_inset(inner, 10,10), 7),
+             (rgb_t){1,1,1});
+  }
+}
+
+struct widget_state {
+
+  tex_t ws_title;
+  tex_t ws_value;
+
+  char ws_cur_value_str[32];
+
+  rect_t ws_hitbox;
+  int ws_hover;
+  int ws_grab;
+
+  double ws_grab_value;
+  int ws_grab_x;
+  int ws_grab_y;
+};
+
+
+static void
+prep_widgets(sview_t *sv)
+{
+  if(sv->sv_widgets == NULL)
+    return;
+
+  sview_widget_t *w;
+  for(w = sv->sv_widgets; w->name != NULL; w++) {
+    if(w->state == NULL) {
+      w->state = calloc(1, sizeof(struct widget_state));
+      tex_use_pic(&w->state->ws_title, text_draw_simple(640, 480, 8, w->name));
+    }
+  }
+}
+
+static void
+draw_widgets(sview_t *sv, const rect_t r0)
+{
+  if(sv->sv_widgets == NULL)
+    return;
+
+  sview_widget_t *w;
+  rect_t r = rect_inset(r0, 5, 5);
+
+  int col1 = 0;
+
+  const rgb_t hover = (rgb_t){1.0, 1.0, 1.0};
+  const rgb_t def   = (rgb_t){0.7, 0.7, 0.7};
+
+  for(w = sv->sv_widgets; w->name != NULL; w++) {
+    struct widget_state *ws = w->state;
+
+    const int height = 16;
+    ws->ws_hitbox = (rect_t){r.left, r.top, r.right, r.top + height};
+    r.top += height;
+
+    const rect_t rt = rect_align(&ws->ws_title, ws->ws_hitbox, 4);
+    tex_draw(&ws->ws_title, rt,
+             ws->ws_grab || ws->ws_hover ? hover : def);
+    col1 = MAX(col1, rt.right - rt.left);
+  }
+
+  col1 += 10;
+
+  for(w = sv->sv_widgets; w->name != NULL; w++) {
+    struct widget_state *ws = w->state;
+    char value_str[32];
+    snprintf(value_str, sizeof(value_str), "%d", *w->value);
+    if(strcmp(ws->ws_cur_value_str, value_str)) {
+      strcpy(ws->ws_cur_value_str, value_str);
+      tex_use_pic(&ws->ws_value, text_draw_simple(640, 480, 8, value_str));
+    }
+
+    rect_t rt = rect_align(&w->state->ws_value,
+                           rect_pad(ws->ws_hitbox, col1, 0, 0, 0), 4);
+    tex_draw(&w->state->ws_value, rt,
+             ws->ws_grab || ws->ws_hover ? hover : def);
   }
 }
 
 
+static void
+widget_event(sview_t *sv, const XEvent *xev)
+{
+  sview_widget_t *w;
+  if(sv->sv_widgets == NULL)
+    return;
+
+  for(w = sv->sv_widgets; w->name != NULL; w++) {
+    struct widget_state *ws = w->state;
+    ws->ws_hover =
+      xev->xmotion.x >= ws->ws_hitbox.left &&
+      xev->xmotion.x <= ws->ws_hitbox.right &&
+      xev->xmotion.y >= ws->ws_hitbox.top &&
+      xev->xmotion.y <= ws->ws_hitbox.bottom;
+
+    if(ws->ws_hover && xev->type == ButtonPress) {
+      ws->ws_grab = 1;
+      ws->ws_grab_x = xev->xmotion.x;
+      ws->ws_grab_y = xev->xmotion.y;
+      ws->ws_grab_value = *w->value;
+    }
+    if(xev->type == ButtonRelease) {
+      ws->ws_grab = 0;
+    }
+
+
+    if(ws->ws_grab && xev->type == MotionNotify) {
+      const float delta = xev->xmotion.x - ws->ws_grab_x;
+      const float range = w->max - w->min;
+
+      float d = delta * range / 1000;
+      int v = MAX(MIN(w->max, d + ws->ws_grab_value), w->min);
+      *w->value = v;
+      w->updated(w);
+    }
+  }
+
+}
 
 static void
 draw_scene(sview_t *sv, int win_width, int win_height)
@@ -371,8 +550,9 @@ draw_scene(sview_t *sv, int win_width, int win_height)
   copy_pending_cells(sv);
   upload_textures(sv);
 
-  const rect_t r = {0, 0, win_width, win_height};
-  draw_cells(sv, r);
+  draw_cells(sv, (const rect_t){0, 0, win_width, win_height});
+
+  draw_widgets(sv, (const rect_t){win_width * 2 / 3, 0, win_width, win_height});
 }
 
 
@@ -397,7 +577,8 @@ sview_thread(void *aux)
 
   XSetWindowAttributes swa = {
     .colormap = XCreateColormap(dpy, root, vi->visual, AllocNone),
-    .event_mask = ExposureMask | KeyPressMask
+    .event_mask = ExposureMask | KeyPressMask |
+    ButtonPressMask | ButtonReleaseMask | PointerMotionMask | ButtonMotionMask,
   };
 
   int win_width  = sv->sv_width;
@@ -412,12 +593,14 @@ sview_thread(void *aux)
   GLXContext glc = glXCreateContext(dpy, vi, NULL, GL_TRUE);
   glXMakeCurrent(dpy, win, glc);
 
-  glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glEnable(GL_BLEND);
   glEnable(GL_TEXTURE_2D);
 
   glMatrixMode(GL_MODELVIEW);
   glLoadIdentity();
+
+  prep_widgets(sv);
 
   while(1) {
     XWindowAttributes gwa;
@@ -426,25 +609,20 @@ sview_thread(void *aux)
     while(XPending(dpy)) {
       XNextEvent(dpy, &xev);
 
-      if(xev.type == Expose) {
+      switch(xev.type) {
+      case Expose:
         XGetWindowAttributes(dpy, win, &gwa);
-
         win_width  = gwa.width;
         win_height = gwa.height;
-
         glViewport(0, 0, win_width, win_height);
-      } else if(xev.type == KeyPress) {
-
-        printf("keypress\n");
-#if 0
-        handle_keypress(&xev);
-
-        glXMakeCurrent(dpy, None, NULL);
-        glXDestroyContext(dpy, glc);
-        XDestroyWindow(dpy, win);
-        XCloseDisplay(dpy);
-        exit(0);
-#endif
+        break;
+      case KeyPress:
+        break;
+      case ButtonPress:
+      case ButtonRelease:
+      case MotionNotify:
+        widget_event(sv, &xev);
+        break;
       }
     }
 
@@ -459,12 +637,14 @@ sview_thread(void *aux)
 
 
 sview_t *
-sview_create(const char *title, int width, int height)
+sview_create(const char *title, int width, int height,
+             sview_widget_t *widgets)
 {
   sview_t *sv = calloc(1, sizeof(sview_t));
   sv->sv_title = strdup(title);
   sv->sv_width = width;
   sv->sv_height = height;
+  sv->sv_widgets = widgets;
   TAILQ_INIT(&sv->sv_pending_cells);
   TAILQ_INIT(&sv->sv_cells);
   pthread_t tid;

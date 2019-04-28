@@ -4,6 +4,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#if 0
+}
+#endif
 
 #include <stdint.h>
 
@@ -29,8 +32,25 @@ typedef struct sview_picture {
 
 } sview_picture_t;
 
+
+typedef enum {
+  SVIEW_WIDGET_INT,
+} sview_widget_type_t;
+
+
+typedef struct sview_widget {
+  const char *name;
+  sview_widget_type_t type;
+  int min;
+  int *value;
+  int max;
+  void (*updated)(struct sview_widget *widget);
+  struct widget_state *state; // Internal state
+} sview_widget_t;
+
 // Open a window
-sview_t *sview_create(const char *title, int width, int height);
+sview_t *sview_create(const char *title, int width, int height,
+                      sview_widget_t *widgets);
 
 void sview_put_picture(sview_t *sv, int col, int row,
                        sview_picture_t *picture,
