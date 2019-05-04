@@ -54,7 +54,9 @@ sview_t *sview_create(const char *title, int width, int height,
 
 void sview_put_picture(sview_t *sv, int col, int row,
                        sview_picture_t *picture,
-                       const char *text);
+                       const char *text, int flags);
+
+#define SVIEW_PIC_CROSSHAIR 0x1
 
 sview_picture_t *sview_picture_alloc(unsigned int width, unsigned int height,
                                      sview_pixfmt_t pixfmt, int clear);

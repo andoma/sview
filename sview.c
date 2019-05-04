@@ -35,6 +35,8 @@ typedef struct img_cell {
   tex_t ic_content;
   tex_t ic_overlay;
 
+  int ic_flags;
+
 } img_cell_t;
 
 
@@ -261,6 +263,7 @@ copy_pending_cells(sview_t *sv)
       TAILQ_INSERT_HEAD(&sv->sv_cells, ic, ic_link);
     }
 
+    ic->ic_flags = p->ic_flags;
     tex_source_swap(&ic->ic_content, &p->ic_content);
     tex_source_swap(&ic->ic_overlay, &p->ic_overlay);
 
@@ -358,7 +361,6 @@ tex_draw(const tex_t *t, const rect_t rect, const rgb_t col)
 
   glBindTexture(GL_TEXTURE_2D, t->t_texture);
 
-  glDisable(GL_BLEND);
   glColor4f(col.r,col.g,col.b,1);
   glBegin(GL_QUADS);
   glTexCoord2f(0, 0);   glVertex3f(rect.left,  rect.top,    0);
@@ -366,7 +368,6 @@ tex_draw(const tex_t *t, const rect_t rect, const rgb_t col)
   glTexCoord2f(1, 1);   glVertex3f(rect.right, rect.bottom, 0);
   glTexCoord2f(0, 1);   glVertex3f(rect.left,  rect.bottom, 0);
   glEnd();
-  glEnable(GL_BLEND);
 }
 
 
@@ -374,7 +375,7 @@ static void
 crosshair_draw(const rect_t rect)
 {
   glDisable(GL_TEXTURE_2D);
-  glColor4f(0,1,0,1);
+  glColor4f(0,0,0,1);
   glBegin(GL_LINES);
   int xc = (rect.left + rect.right)  / 2;
   int yc = (rect.top  + rect.bottom) / 2;
@@ -412,7 +413,8 @@ draw_cells(sview_t *sv, const rect_t r0)
 
     const rect_t inner = rect_fit(&ic->ic_content, r);
     tex_draw(&ic->ic_content, inner, (rgb_t){1,1,1});
-    crosshair_draw(inner);
+    if(ic->ic_flags & SVIEW_PIC_CROSSHAIR)
+      crosshair_draw(inner);
 
     tex_draw(&ic->ic_overlay, rect_align(&ic->ic_overlay,
                                          rect_inset(inner, 10,10), 7),
@@ -662,7 +664,7 @@ sview_create(const char *title, int width, int height,
 void
 sview_put_picture(sview_t *sv, int col, int row,
                   sview_picture_t *picture,
-                  const char *text)
+                  const char *text, int flags)
 {
   img_cell_t *ic = calloc(1, sizeof(img_cell_t));
   ic->ic_content.t_source = picture;
@@ -671,6 +673,7 @@ sview_put_picture(sview_t *sv, int col, int row,
 
   ic->ic_col = col;
   ic->ic_row = row;
+  ic->ic_flags = flags;
 
   pthread_mutex_lock(&sv->sv_cell_mutex);
   TAILQ_INSERT_TAIL(&sv->sv_pending_cells, ic, ic_link);
