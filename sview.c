@@ -36,6 +36,7 @@ typedef struct img_cell {
   tex_t ic_overlay;
 
   int ic_flags;
+  int ic_grid_size;
 
 } img_cell_t;
 
@@ -264,6 +265,7 @@ copy_pending_cells(sview_t *sv)
     }
 
     ic->ic_flags = p->ic_flags;
+    ic->ic_grid_size = p->ic_grid_size;
     tex_source_swap(&ic->ic_content, &p->ic_content);
     tex_source_swap(&ic->ic_overlay, &p->ic_overlay);
 
@@ -372,10 +374,14 @@ tex_draw(const tex_t *t, const rect_t rect, const rgb_t col)
 
 
 static void
-crosshair_draw(const rect_t rect)
+crosshair_draw(const rect_t rect, int grid, int flags)
 {
   glDisable(GL_TEXTURE_2D);
-  glColor4f(0,0,0,1);
+  if(flags & SVIEW_PIC_CROSSHAIR_GREEN)
+    glColor4f(0,1,0,0.8);
+  else
+    glColor4f(0,0,0,1);
+
   glBegin(GL_LINES);
   int xc = (rect.left + rect.right)  / 2;
   int yc = (rect.top  + rect.bottom) / 2;
@@ -383,6 +389,21 @@ crosshair_draw(const rect_t rect)
   glVertex3f(xc,  rect.bottom, 0);
   glVertex3f(rect.left,  yc, 0);
   glVertex3f(rect.right, yc, 0);
+
+  if(grid) {
+    for(int i = 1; i <= 10; i++) {
+
+      glVertex3f(xc + i * grid,  rect.top,    0);
+      glVertex3f(xc + i * grid,  rect.bottom, 0);
+      glVertex3f(xc - i * grid,  rect.top,    0);
+      glVertex3f(xc - i * grid,  rect.bottom, 0);
+      glVertex3f(rect.left,  yc + i * grid, 0);
+      glVertex3f(rect.right, yc + i * grid, 0);
+      glVertex3f(rect.left,  yc - i * grid, 0);
+      glVertex3f(rect.right, yc - i * grid, 0);
+    }
+  }
+
   glEnd();
   glEnable(GL_TEXTURE_2D);
 }
@@ -414,7 +435,7 @@ draw_cells(sview_t *sv, const rect_t r0)
     const rect_t inner = rect_fit(&ic->ic_content, r);
     tex_draw(&ic->ic_content, inner, (rgb_t){1,1,1});
     if(ic->ic_flags & SVIEW_PIC_CROSSHAIR)
-      crosshair_draw(inner);
+      crosshair_draw(inner, ic->ic_grid_size, ic->ic_flags);
 
     tex_draw(&ic->ic_overlay, rect_align(&ic->ic_overlay,
                                          rect_inset(inner, 10,10), 7),
@@ -533,7 +554,8 @@ widget_event(sview_t *sv, const XEvent *xev)
       float d = delta * range / 1000;
       int v = MAX(MIN(w->max, d + ws->ws_grab_value), w->min);
       *w->value = v;
-      w->updated(w);
+      if(w->updated)
+        w->updated(w);
     }
   }
 
@@ -664,7 +686,7 @@ sview_create(const char *title, int width, int height,
 void
 sview_put_picture(sview_t *sv, int col, int row,
                   sview_picture_t *picture,
-                  const char *text, int flags)
+                  const char *text, int flags, int grid_size)
 {
   img_cell_t *ic = calloc(1, sizeof(img_cell_t));
   ic->ic_content.t_source = picture;
@@ -674,6 +696,7 @@ sview_put_picture(sview_t *sv, int col, int row,
   ic->ic_col = col;
   ic->ic_row = row;
   ic->ic_flags = flags;
+  ic->ic_grid_size = grid_size;
 
   pthread_mutex_lock(&sv->sv_cell_mutex);
   TAILQ_INSERT_TAIL(&sv->sv_pending_cells, ic, ic_link);
