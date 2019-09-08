@@ -739,7 +739,8 @@ sview_picture_alloc(unsigned int width, unsigned int height,
     return NULL;
   }
 
-  sp->strides[0] = ((bpp * width) + 4) & ~4;
+  const int align = 4;
+  sp->strides[0] = ((bpp * width) + (align - 1)) & ~(align - 1);
   const size_t siz = sp->strides[0] * height;
   sp->planes[0] = valloc(siz);
   if(clear)
